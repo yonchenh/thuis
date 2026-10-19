@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Thuis</title>
+<meta name="robots" content="noindex">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Thuis">
+<meta name="theme-color" content="#4C6B57">
+<link rel="apple-touch-icon" href="icon.png">
+<link rel="icon" href="icon.png">
+<style>
+:root{--bg:#F6F1E8;--card:#FFFDF8;--ink:#2B2621;--muted:#7A6F63;--line:#E6DCCD;--leaf:#4C6B57;--err:#C2362B;color-scheme:light dark}
+@media (prefers-color-scheme:dark){:root{--bg:#171512;--card:#211E1A;--ink:#F1EADF;--muted:#A99E90;--line:#38322B;--leaf:#8FB298}}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;padding:24px}
+main{width:min(420px,100%);background:var(--card);border:1px solid var(--line);border-radius:28px;padding:28px;box-shadow:0 20px 50px -20px rgba(60,40,20,.25)}
+.logo{display:flex;align-items:center;gap:12px;margin-bottom:14px}
+.logo img{width:48px;height:48px;border-radius:14px}
+h1{font-size:1.6rem;margin:0}
+p{color:var(--muted);margin:0 0 16px;font-size:.95rem}
+label{display:block;font-size:.82rem;font-weight:600;color:var(--muted);margin-top:10px}
+input{width:100%;margin-top:4px;padding:11px 12px;border:1px solid var(--line);border-radius:12px;background:transparent;color:var(--ink);font:inherit}
+button{margin-top:18px;width:100%;padding:12px;border:0;border-radius:999px;background:var(--leaf);color:#fff;font:700 1rem system-ui,sans-serif;cursor:pointer}
+.err{color:var(--err);font-weight:600}
+.spin{width:22px;height:22px;border:3px solid var(--line);border-top-color:var(--leaf);border-radius:50%;animation:s 1s linear infinite;margin:6px auto 0}
+@keyframes s{to{transform:rotate(360deg)}}
+small{display:block;color:var(--muted);margin-top:14px;font-size:.78rem}
+</style>
+</head>
+<body>
+<main>
+  <div class="logo"><img src="icon.png" alt=""><h1>Thuis</h1></div>
+  <div id="state"><p>Opening your home…</p><div class="spin"></div></div>
+  <form id="form" hidden>
+    <p id="msg">Connect this device to your private GitHub repository. You only do this once per device.</p>
+    <label for="o">GitHub username</label><input id="o" value="yonchenh" autocomplete="username" autocapitalize="off" spellcheck="false">
+    <label for="r">Data repository</label><input id="r" value="thuis-data" autocomplete="off" autocapitalize="off" spellcheck="false">
+    <label for="t">Access token</label><input id="t" type="password" autocomplete="off" placeholder="github_pat_…">
+    <button type="submit">Connect</button>
+    <small>The token stays on this device only. Make it on github.com → Settings → Developer settings → Fine-grained tokens, with access to the data repository only (Contents: read and write).</small>
+  </form>
+</main>
+<script>
+(function(){
+"use strict";
+var CFG="thuis:gh";
+function $(id){return document.getElementById(id);}
+function cfg(){try{var c=JSON.parse(localStorage.getItem(CFG)||"null");return c&&c.owner&&c.repo&&c.token?c:null;}catch(e){return null;}}
+function idb(){return new Promise(function(res,rej){var r=indexedDB.open("thuis-loader",1);r.onupgradeneeded=function(){r.result.createObjectStore("kv");};r.onsuccess=function(){res(r.result);};r.onerror=function(){rej(r.error);};});}
+function idbGet(k){return idb().then(function(db){return new Promise(function(res){var q=db.transaction("kv").objectStore("kv").get(k);q.onsuccess=function(){res(q.result);};q.onerror=function(){res(null);};});}).catch(function(){return null;});}
+function idbSet(k,v){return idb().then(function(db){return new Promise(function(res){var t=db.transaction("kv","readwrite");t.objectStore("kv").put(v,k);t.oncomplete=function(){res();};t.onerror=function(){res();};});}).catch(function(){});}
+function api(c,path,raw){return fetch("https://api.github.com/repos/"+encodeURIComponent(c.owner)+"/"+encodeURIComponent(c.repo)+(path?"/contents/"+path:""),{headers:{"Authorization":"Bearer "+c.token,"Accept":raw?"application/vnd.github.raw":"application/vnd.github+json","X-GitHub-Api-Version":"2022-11-28"},cache:"no-store"});}
+function showForm(msg,isErr){$("state").hidden=true;$("form").hidden=false;if(msg){$("msg").textContent=msg;$("msg").className=isErr?"err":"";}var c=cfg();if(c){$("o").value=c.owner;$("r").value=c.repo;}}
+function open(html){document.open();document.write(html);document.close();}
+async function boot(){
+  var c=cfg();if(!c){showForm();return;}
+  var html=null,why="";
+  try{var r=await api(c,"Home.html",true);
+    if(r.ok){html=await r.text();idbSet("home",html);}
+    else if(r.status===401){showForm("GitHub didn't accept the token (it may have expired). Make a new one and connect again.",true);return;}
+    else if(r.status===404){why="Home.html isn't in "+c.owner+"/"+c.repo+" yet. Upload it (see the setup steps), or check the repository name.";}
+    else why="GitHub error "+r.status+".";
+  }catch(e){why="Couldn't reach GitHub.";}
+  if(!html){html=await idbGet("home");if(html&&why==="Couldn't reach GitHub."){open(html);return;}}
+  if(!html||why&&why!=="Couldn't reach GitHub."){showForm(why||"Couldn't open Thuis.",true);return;}
+  open(html);
+}
+$("form").addEventListener("submit",async function(e){
+  e.preventDefault();var c={owner:$("o").value.trim(),repo:$("r").value.trim(),token:$("t").value.trim()};
+  if(!c.owner||!c.repo||!c.token){$("msg").textContent="Fill in all three fields.";$("msg").className="err";return;}
+  $("msg").textContent="Checking…";$("msg").className="";
+  try{var r=await api(c,"");
+    if(r.status===401){$("msg").textContent="GitHub didn't accept that token. Copy it again (it starts with github_pat_).";$("msg").className="err";return;}
+    if(r.status===404){$("msg").textContent="Can't see "+c.owner+"/"+c.repo+". Check the name, and that the token was given access to that repository.";$("msg").className="err";return;}
+    if(!r.ok){$("msg").textContent="GitHub error "+r.status+".";$("msg").className="err";return;}
+  }catch(err){$("msg").textContent="Couldn't reach GitHub. Check your internet connection.";$("msg").className="err";return;}
+  localStorage.setItem(CFG,JSON.stringify(c));$("form").hidden=true;$("state").hidden=false;boot();
+});
+boot();
+})();
+</script>
+</body>
+</html>
